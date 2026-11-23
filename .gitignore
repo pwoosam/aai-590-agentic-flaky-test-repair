@@ -1,0 +1,26 @@
+# Acquired data, generated analysis, and large archives
+/data/
+/tests/
+/outputs/
+*.part
+*.zip
+*.tar.gz
+*.csv.gz
+*.json.gz
+
+# Python and Jupyter
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ipynb_checkpoints/
+
+# Credentials and machine-local configuration
+.env
+.env.*
+!.env.example
+credentials*.json
+.vscode/
+.idea/
+.DS_Store
