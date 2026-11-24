@@ -5,7 +5,7 @@
 This repository supports a capstone paper on reproducing and repairing flaky tests
 in Java/Maven CI pipelines. The proposed system uses the Microsoft Agent Framework
 to coordinate failure reproduction, patch proposal, and isolated validation.
-Qwen2.5-Coder-7B-Instruct will be fine-tuned on existing source code and fixing
+Qwen2.5-Coder-3B-Instruct will be fine-tuned on existing source code and fixing
 patches from ReproFlake, without requiring new root-cause labels.
 
 **Research question:** Does fine-tuning on prior flaky-test repairs improve the
@@ -19,8 +19,10 @@ The full-corpus data acquisition and exploratory analysis are complete.
 [dataset_acquisition_eda.ipynb](./dataset_acquisition_eda.ipynb) documents data
 cleaning, repair patterns, historical execution outcomes, and project-wise splits.
 [reproflake_data.py](./reproflake_data.py) supports acquisition, parsing, and
-reference-pair preparation. Model training, agent implementation, and independent
-repair evaluation are planned; the EDA does not establish repair performance.
+reference-pair preparation. The [Colab pipeline](#train-and-compare-on-colab)
+implements LoRA training and static comparison against the same un-tuned Qwen
+checkpoint. Agent orchestration and independent Maven repair validation remain
+separate work. Neither the EDA nor the static comparison establishes repair performance.
 
 ## Run the data analysis
 
@@ -79,8 +81,8 @@ Reference source/patch JSONL files are separated by project partition under
 `data/reproflake/reference_pairs/`. These are **reference/training-preparation
 pairs, not a turnkey SFT dataset**: source context was selected from patch paths
 and therefore reveals edit locations. Do not feed this oracle context to
-evaluation agents. Actual training preparation still requires tokenizer-based
-budgeting, license/sensitive-content checks, and appropriate prompt construction.
+evaluation agents. The model pipeline below builds fresh original-only prompts
+instead of consuming these exports.
 
 The blind holdout manifest omits solution patches, fixed revisions, issue/PR
 links, and patch-derived metrics. Trusted benchmark preparation must mount only
@@ -142,12 +144,57 @@ or evidence of this project's agent performance.
   it does **not** establish compilation, behavioral correctness, or flakiness
   elimination. No downloaded tests, scripts, or containers are run.
 
+## Train and compare on Colab
+
+The [training notebook](./notebooks/train_colab.ipynb) is self-contained: the
+helpers, dependency list, and training script are included in its cells.
+It uses Qwen2.5-Coder-3B-Instruct with Unsloth NF4 QLoRA, FP16 compute, and a
+Colab T4. No code ZIP, Git checkout, or alternate model profile is required.
+
+Prepare the original-only repair inputs after running the acquisition notebook:
+
+```bash
+python -m src.training.prepare --output outputs/reproflake/repair_pairs
+(cd outputs/reproflake && zip -r repair_pairs.zip repair_pairs)
+```
+
+After reviewing the project licenses and sensitive content, upload
+`repair_pairs.zip` to `MyDrive/reproflake/`. Run the notebook top to bottom.
+The default configuration trains for one epoch and compares the base and
+adapted model on validation. It uses a 3,072-token sequence budget with up to
+2,048 patch tokens. A longest-sequence memory preflight runs first; its recorded
+memory use must be checked rather than inferred from a smaller-budget run.
+The T4 allocator guard remains in place. A positive training `max_steps` provides
+a shorter smoke run. Keep test evaluation reserved until model choices are frozen.
+
+The notebook displays token-budget and project coverage, training losses,
+matched token-weighted validation losses for both models, recorded CUDA memory,
+and generation latency/throughput. It reports raw and normalized patch matches,
+changed-line F1 with and without locations, and both full-cohort and
+budget-feasible summaries. Paired project-level bootstrap intervals and selected
+real output examples support interpretation without treating similarity as repair.
+Each run exports the trained adapter, tokenizer, checkpoints, configuration,
+and raw predictions to a new Drive directory. The adapter weights and pinned
+base checkpoint together reproduce the fine-tuned model. No historical scores
+are prefilled in notebook outputs.
+
+Project-disjoint assignments and checksums are validated before training.
+Prompts use only original source and allowlisted environment evidence.
+One representative per distinct repair prevents shared fixes from dominating
+the training loss. Complete targets that exceed the budget are excluded from
+SFT and counted, but long-reference cases remain in generation evaluation.
+Prompt and padding tokens are masked from the loss.
+
+Patch matching, textual diff parse rate, and changed-line F1 are static
+reference-similarity diagnostics, not validated repair rates. The pipeline does
+not apply patches or run Maven, repeated-trigger tests, or regression checks.
+Peak CUDA measurements describe PyTorch's allocator, not GPU-wide usage.
+
 ## Validation
 
 ```bash
-python -m unittest discover -s tests -v
-python -m compileall -q reproflake_data.py tests
-python -m black --check reproflake_data.py tests/test_reproflake_data.py dataset_acquisition_eda.ipynb
+python -m compileall -q reproflake_data.py src
+python -m black --check reproflake_data.py src dataset_acquisition_eda.ipynb notebooks/train_colab.ipynb
 ```
 
 For headless execution with the existing dependencies:
